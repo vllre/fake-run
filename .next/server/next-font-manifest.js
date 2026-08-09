@@ -1,1 +1,1 @@
-self.__NEXT_FONT_MANIFEST='{"pages":{},"app":{"/home/valliere/Documents/fake-run/src/app/layout":["static/media/e4af272ccee01ff0-s.p.woff2"]},"appUsingSizeAdjust":true,"pagesUsingSizeAdjust":false}';
+self.__NEXT_FONT_MANIFEST="{\n  \"app\": {\n    \"[project]/src/app/_not-found/page\": [\n      \"static/media/83afe278b6a6bb3c-s.p.2bn3s6zvc0dyp.woff2\"\n    ],\n    \"[project]/src/app/page\": [\n      \"static/media/83afe278b6a6bb3c-s.p.2bn3s6zvc0dyp.woff2\"\n    ]\n  },\n  \"appUsingSizeAdjust\": true,\n  \"pages\": {},\n  \"pagesUsingSizeAdjust\": false\n}"

@@ -2,6 +2,7 @@ import type { Configuration } from 'webpack'
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  turbopack: {},
   webpack: (config: Configuration) => {
     config.resolve = config.resolve || {};
     config.resolve.fallback = {
