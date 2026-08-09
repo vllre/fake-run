@@ -35,7 +35,11 @@ type Coordinate = [number, number]
 
 export default function Home() {
   const [activityType, setActivityType] = useState("run")
-  const [date, setDate] = useState<Date>()
+  const [date, setDate] = useState<Date | undefined>(undefined)
+  const [activityName, setActivityName] = useState("")
+  const [activityDesc, setActivityDesc] = useState("")
+  const [paceUnit, setPaceUnit] = useState("min/km")
+  const [speedUnit, setSpeedUnit] = useState("km/h")
   const [pace, setPace] = useState([5.5])
   const [speed, setSpeed] = useState([20])
   const [searchQuery, setSearchQuery] = useState("")
@@ -47,6 +51,9 @@ export default function Home() {
   })
   const [gpxCreator, setGpxCreator] = useState("StravaGPX")
   const [garminModel, setGarminModel] = useState("")
+  const [startHour, setStartHour] = useState("07")
+  const [startMinute, setStartMinute] = useState("00")
+  const [gpsRealism, setGpsRealism] = useState("natural") // 'natural', 'high', 'off'
   const gpxCreatorOptions = [
     { label: "Strava GPX", value: "StravaGPX" },
     { label: "Garmin", value: "Garmin" },
@@ -55,107 +62,66 @@ export default function Home() {
     { label: "Coros", value: "Coros" },
   ]
   const garminModelSuggestions = [
-    "Garmin Forerunner 265",
-    "Garmin Forerunner 945",
-    "Garmin Forerunner 165 Music",
-    "Garmin Forerunner 255",
-    "Garmin Forerunner 955",
-    "Garmin Forerunner 245",
+    // Fenix / Epix series
     "Garmin Fenix 7",
     "Garmin Fenix 6",
-    "Garmin Instinct 2",
+    "Garmin Epix Pro",
     "Garmin Enduro 2",
+    // Forerunner 9xx
+    "Garmin Forerunner 965",
+    "Garmin Forerunner 955",
+    "Garmin Forerunner 945 LTE",
+    "Garmin Forerunner 945",
+    "Garmin Forerunner 935",
+    "Garmin Forerunner 920XT",
+    "Garmin Forerunner 910XT",
+    // Forerunner 7xx
+    "Garmin Forerunner 745",
+    "Garmin Forerunner 735XT",
+    // Forerunner 6xx
+    "Garmin Forerunner 630",
+    "Garmin Forerunner 620",
+    "Garmin Forerunner 610",
+    // Forerunner 2xx
+    "Garmin Forerunner 265S",
+    "Garmin Forerunner 265",
+    "Garmin Forerunner 255S",
+    "Garmin Forerunner 255",
+    "Garmin Forerunner 245",
+    "Garmin Forerunner 235",
+    "Garmin Forerunner 230",
+    "Garmin Forerunner 220",
+    "Garmin Forerunner 210",
+    "Garmin Forerunner 201",
+    // Forerunner 1xx
+    "Garmin Forerunner 165 Music",
+    "Garmin Forerunner 165",
+    "Garmin Forerunner 110",
+    "Garmin Forerunner 101",
+    // Forerunner 5x
+    "Garmin Forerunner 55",
+    "Garmin Forerunner 50",
+    // Forerunner 4x
+    "Garmin Forerunner 45S",
+    "Garmin Forerunner 45",
+    "Garmin Forerunner 410",
+    "Garmin Forerunner 405CX",
+    "Garmin Forerunner 405",
+    // Forerunner 3x
+    "Garmin Forerunner 35",
+    "Garmin Forerunner 310XT",
+    "Garmin Forerunner 301",
+    // Forerunner 2x / 1x
+    "Garmin Forerunner 25",
+    "Garmin Forerunner 15",
+    "Garmin Forerunner 10",
+    "Garmin Forerunner 70",
+    "Garmin Forerunner 60",
+    // Other
+    "Garmin Instinct 2",
     "Garmin Venu 3",
     "Garmin Vivoactive 5",
     "Garmin Edge 1040",
-    "Garmin Epix Pro",
-    "Garmin Forerunner 165",
-    "Garmin Forerunner 55",
-    "Garmin Forerunner 45",
-    "Garmin Forerunner 745",
-    "Garmin Forerunner 735XT",
-    "Garmin Forerunner 935",
-    "Garmin Forerunner 35",
-    "Garmin Forerunner 10",
-    "Garmin Forerunner 920XT",
-    "Garmin Forerunner 310XT",
-    "Garmin Forerunner 405",
-    "Garmin Forerunner 410",
-    "Garmin Forerunner 620",
-    "Garmin Forerunner 630",
-    "Garmin Forerunner 910XT",
-    "Garmin Forerunner 301",
-    "Garmin Forerunner 201",
-    "Garmin Forerunner 101",
-    "Garmin Forerunner 50",
-    "Garmin Forerunner 60",
-    "Garmin Forerunner 70",
-    "Garmin Forerunner 110",
-    "Garmin Forerunner 210",
-    "Garmin Forerunner 220",
-    "Garmin Forerunner 230",
-    "Garmin Forerunner 235",
-    "Garmin Forerunner 610",
-    "Garmin Forerunner 620",
-    "Garmin Forerunner 735XT",
-    "Garmin Forerunner 920XT",
-    "Garmin Forerunner 935",
-    "Garmin Forerunner 945 LTE",
-    "Garmin Forerunner 945",
-    "Garmin Forerunner 955",
-    "Garmin Forerunner 965",
-    "Garmin Forerunner 165 Music",
-    "Garmin Forerunner 165",
-    "Garmin Forerunner 265",
-    "Garmin Forerunner 265S",
-    "Garmin Forerunner 255",
-    "Garmin Forerunner 255S",
-    "Garmin Forerunner 55",
-    "Garmin Forerunner 45",
-    "Garmin Forerunner 45S",
-    "Garmin Forerunner 35",
-    "Garmin Forerunner 25",
-    "Garmin Forerunner 15",
-    "Garmin Forerunner 10",
-    "Garmin Forerunner 405CX",
-    "Garmin Forerunner 410",
-    "Garmin Forerunner 610",
-    "Garmin Forerunner 620",
-    "Garmin Forerunner 630",
-    "Garmin Forerunner 910XT",
-    "Garmin Forerunner 301",
-    "Garmin Forerunner 201",
-    "Garmin Forerunner 101",
-    "Garmin Forerunner 50",
-    "Garmin Forerunner 60",
-    "Garmin Forerunner 70",
-    "Garmin Forerunner 110",
-    "Garmin Forerunner 210",
-    "Garmin Forerunner 220",
-    "Garmin Forerunner 230",
-    "Garmin Forerunner 235",
-    "Garmin Forerunner 610",
-    "Garmin Forerunner 620",
-    "Garmin Forerunner 735XT",
-    "Garmin Forerunner 920XT",
-    "Garmin Forerunner 935",
-    "Garmin Forerunner 945 LTE",
-    "Garmin Forerunner 945",
-    "Garmin Forerunner 955",
-    "Garmin Forerunner 965",
-    "Garmin Forerunner 165 Music",
-    "Garmin Forerunner 165",
-    "Garmin Forerunner 265",
-    "Garmin Forerunner 265S",
-    "Garmin Forerunner 255",
-    "Garmin Forerunner 255S",
-    "Garmin Forerunner 55",
-    "Garmin Forerunner 45",
-    "Garmin Forerunner 45S",
-    "Garmin Forerunner 35",
-    "Garmin Forerunner 25",
-    "Garmin Forerunner 15",
-    "Garmin Forerunner 10",
   ]
   const [showGarminSuggestions, setShowGarminSuggestions] = useState(false)
   const garminInputRef = useRef<HTMLInputElement>(null)
@@ -199,11 +165,34 @@ export default function Home() {
     })
   }
 
-  // Helper to adjust date to local time (for Strava date correctness)
-  function toLocalISOString(date: Date) {
-    const tzOffset = date.getTimezoneOffset() * 60000;
-    const localISO = new Date(date.getTime() - tzOffset).toISOString().slice(0, -1);
-    return localISO + 'Z';
+  // Build a proper UTC ISO string from a local Date + user-selected hour/minute.
+  // Strava reads GPX timestamps as UTC, then converts to the athlete's local timezone for display.
+  // So we must write REAL UTC: local time minus the browser's UTC offset.
+  // e.g. 16:00 WIB (UTC+7) → write T09:00:00Z → Strava displays as 16:00 WIB ✓
+  function buildGpxTimestamp(localDate: Date, hour: string, minute: string, extraSeconds = 0): string {
+    // Start with total seconds in local time
+    const localTotalSeconds = parseInt(hour) * 3600 + parseInt(minute) * 60 + extraSeconds;
+    // getTimezoneOffset() returns minutes BEHIND UTC (negative for UTC+x zones)
+    // e.g. WIB (UTC+7) → -420 min → -25200 sec
+    const tzOffsetSeconds = localDate.getTimezoneOffset() * 60;
+    // Convert to UTC seconds
+    const utcTotalSeconds = localTotalSeconds + tzOffsetSeconds;
+    // Calculate day overflow/underflow (e.g. 22:00 WIB + extra 3h = 01:00 UTC next day)
+    const dayOffset = Math.floor(utcTotalSeconds / 86400);
+    const utcSecondsInDay = ((utcTotalSeconds % 86400) + 86400) % 86400; // keep positive
+    // Compute final UTC date with day offset
+    const utcDate = new Date(
+      localDate.getFullYear(),
+      localDate.getMonth(),
+      localDate.getDate() + dayOffset
+    );
+    const y = utcDate.getFullYear();
+    const mo = String(utcDate.getMonth() + 1).padStart(2, '0');
+    const d = String(utcDate.getDate()).padStart(2, '0');
+    const th = Math.floor(utcSecondsInDay / 3600);
+    const tm = Math.floor((utcSecondsInDay % 3600) / 60);
+    const ts = utcSecondsInDay % 60;
+    return `${y}-${mo}-${d}T${String(th).padStart(2,'0')}:${String(tm).padStart(2,'0')}:${String(ts).padStart(2,'0')}Z`;
   }
 
   // Helper to interpolate points every ~10 meters between coordinates
@@ -235,6 +224,49 @@ export default function Home() {
     return result;
   }
 
+  // Helper to add natural GPS drift / jitter (coretan GPS) for realistic watch tracking on Strava
+  function applyGpsDrift(coords: Coordinate[], driftMeters = 1.8): Coordinate[] {
+    if (coords.length < 3 || driftMeters <= 0) return coords;
+    const n = coords.length;
+    const R = 6371000;
+
+    // Deterministic seed based on track coordinates
+    const seed = coords.reduce((acc, c) => acc + c[0] + c[1], 0);
+    const pseudoRand = (i: number) => {
+      const x = Math.sin(seed + i * 12.9898) * 43758.5453;
+      return x - Math.floor(x);
+    };
+
+    return coords.map(([lon, lat], i) => {
+      if (i === 0 || i === n - 1) return [lon, lat];
+
+      const prev = coords[i - 1];
+      const next = coords[i + 1];
+      const dLat = (next[1] - prev[1]) * (Math.PI / 180);
+      const dLon = (next[0] - prev[0]) * (Math.PI / 180) * Math.cos(lat * Math.PI / 180);
+
+      const len = Math.sqrt(dLat * dLat + dLon * dLon);
+      if (len === 0) return [lon, lat];
+
+      // Perpendicular vector (-dy, dx)
+      const perpLat = -dLon / len;
+      const perpLon = dLat / len;
+
+      // Multi-frequency smooth sway + micro-jitter
+      const phase1 = Math.sin(i * 0.25 + seed % 10) * 0.7;
+      const phase2 = Math.sin(i * 0.08 + seed % 7) * 0.3;
+      const jitter = (pseudoRand(i) - 0.5) * 0.3;
+
+      const edgeFade = Math.min(1, i / 5, (n - 1 - i) / 5);
+      const totalDriftMeters = (phase1 + phase2 + jitter) * driftMeters * edgeFade;
+
+      const latOffset = (totalDriftMeters * perpLat) / (R * (Math.PI / 180));
+      const lonOffset = (totalDriftMeters * perpLon) / (R * (Math.PI / 180) * Math.cos(lat * Math.PI / 180));
+
+      return [lon + lonOffset, lat + latOffset];
+    });
+  }
+
   return (
     <main className="flex flex-col min-h-screen bg-white">
       <header className="w-full flex flex-col items-center py-4 mb-2 md:mb-4">
@@ -258,6 +290,7 @@ export default function Home() {
               onSearchSelect={(result: SearchResult) => {
                 setSearchQuery(result.place_name)
               }}
+              gpsRealism={gpsRealism}
             />
           </div>
         </div>
@@ -280,24 +313,27 @@ export default function Home() {
             <div className="space-y-4 md:space-y-6">
               <div>
                 <label className="text-sm font-medium">{activityType === "run" ? "Pace Unit" : "Speed Unit"}</label>
-                <Select defaultValue={activityType === "run" ? "min/km" : "km/h"}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activityType === "run" ? (
-                      <>
-                        <SelectItem value="min/km">min/km</SelectItem>
-                        <SelectItem value="km/h">km/h</SelectItem>
-                      </>
-                    ) : (
-                      <>
-                        <SelectItem value="km/h">km/h</SelectItem>
-                        <SelectItem value="mph">mph</SelectItem>
-                      </>
-                    )}
-                  </SelectContent>
-                </Select>
+                {activityType === "run" ? (
+                  <Select value={paceUnit} onValueChange={setPaceUnit}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="min/km">min/km</SelectItem>
+                      <SelectItem value="km/h">km/h</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Select value={speedUnit} onValueChange={setSpeedUnit}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="km/h">km/h</SelectItem>
+                      <SelectItem value="mph">mph</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
 
               <div>
@@ -316,8 +352,18 @@ export default function Home() {
                     <div className="text-sm text-gray-500">Elevation Gain</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-3xl font-bold">{activityType === "run" ? pace[0].toFixed(2) : speed[0].toFixed(1)}</div>
-                    <div className="text-sm text-gray-500">{activityType === "run" ? "min/km" : "km/h"}</div>
+                    <div className="text-3xl font-bold">
+                      {activityType === "run"
+                        ? paceUnit === "min/km"
+                          ? pace[0].toFixed(2)
+                          : (60 / pace[0]).toFixed(1)
+                        : speedUnit === "km/h"
+                          ? speed[0].toFixed(1)
+                          : (speed[0] / 1.60934).toFixed(1)}
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      {activityType === "run" ? paceUnit : speedUnit}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -347,7 +393,12 @@ export default function Home() {
 
               <div>
                 <label className="text-sm font-medium">{activityType === "run" ? "Run Name" : "Ride Name"}</label>
-                <Input placeholder={activityType === "run" ? "Morning Run" : "Morning Ride"} className="mt-1" />
+                <Input
+                  value={activityName}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setActivityName(e.target.value)}
+                  placeholder={activityType === "run" ? "Morning Run" : "Morning Ride"}
+                  className="mt-1"
+                />
               </div>
 
               <div>
@@ -362,7 +413,7 @@ export default function Home() {
                     <Calendar
                       mode="single"
                       selected={date}
-                      onSelect={setDate}
+                      onSelect={(day: Date | undefined) => setDate(day)}
                     />
                   </PopoverContent>
                 </Popover>
@@ -371,7 +422,7 @@ export default function Home() {
               <div>
                 <label className="text-sm font-medium">Start Time</label>
                 <div className="flex gap-2 mt-1">
-                  <Select defaultValue="07">
+                  <Select value={startHour} onValueChange={setStartHour}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -384,7 +435,7 @@ export default function Home() {
                     </SelectContent>
                   </Select>
                   <span className="text-xl">:</span>
-                  <Select defaultValue="00">
+                  <Select value={startMinute} onValueChange={setStartMinute}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -401,7 +452,9 @@ export default function Home() {
 
               <div>
                 <label className="text-sm font-medium">Description</label>
-                <Textarea 
+                <Textarea
+                  value={activityDesc}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setActivityDesc(e.target.value)}
                   placeholder={activityType === "run" ? "Great morning run through the park..." : "Great morning ride through the park..."}
                   className="mt-1"
                 />
@@ -417,6 +470,20 @@ export default function Home() {
                     {gpxCreatorOptions.map(opt => (
                       <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium">GPS Track Realism (Coretan GPS)</label>
+                <Select value={gpsRealism} onValueChange={setGpsRealism}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="natural">Alami (Realistic Watch Drift ~1.8m)</SelectItem>
+                    <SelectItem value="high">Tinggi (City / High Jitter ~3.0m)</SelectItem>
+                    <SelectItem value="off">Lurus Vektor (Exact Road Line)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -461,27 +528,40 @@ export default function Home() {
                 onClick={() => {
                   if (routeStats.distance === 0) return;
                   // Get activity name and description
-                  const nameInput = document.querySelector('input[placeholder="Morning Run"]') as HTMLInputElement;
-                  if (!nameInput?.value.trim()) return;
-                  const activityName = nameInput.value.trim();
-                  const activityDesc = (document.querySelector('textarea') as HTMLTextAreaElement)?.value.trim() || '';
-                  // Set exact date and time from user inputs
-                  const timeSelects = Array.from(document.querySelectorAll('select'));
-                  const userHours = timeSelects[0]?.value || '00';
-                  const userMinutes = timeSelects[1]?.value || '00';
-                  const startDate = new Date(date || new Date());
-                  startDate.setHours(parseInt(userHours), parseInt(userMinutes), 0, 0);
-                  // Calculate speeds and times
-                  const paceInMinPerKm = parseFloat(pace[0].toString());
-                  const avgSpeed = activityType === "run"
-                    ? 1000 / (paceInMinPerKm * 60) // Convert min/km to m/s
-                    : parseFloat(speed[0].toString()) * 1000 / 3600; // Convert km/h to m/s
-                  const durationInSeconds = Math.round(routeStats.duration * 60);
-                  const distanceInMeters = Math.round(routeStats.distance * 1000);
-                  // Interpolate points for realistic GPX
-                  const interpolatedCoords = interpolateRoutePoints(coordinates, 10); // 10 meters spacing
+                  const trimmedName = activityName.trim();
+                  if (!trimmedName) return;
+                  // activityDesc comes from useState, no DOM query needed
+                  // Use the selected date (or today) as reference for year/month/day only
+                  const refDate = date || new Date();
+
+                  // --- Pace / Speed → Duration ---
+                  // Always recalculate from the slider values at download time.
+                  // routeStats.duration can be stale (Map uses its own hardcoded 5.5 min/km).
+                  // Strava derives pace entirely from trackpoint <time> timestamps,
+                  // so durationInSeconds is the ONLY thing that controls displayed pace.
+                  const distanceKm = routeStats.distance;
+                  const distanceInMeters = Math.round(distanceKm * 1000);
+
+                  let durationInSeconds: number;
+                  let avgSpeed: number; // m/s
+
+                  if (activityType === "run") {
+                    const paceMinPerKm = pace[0];            // e.g. 5.5 min/km
+                    durationInSeconds = Math.round(distanceKm * paceMinPerKm * 60); // km × min/km × 60s
+                    avgSpeed = 1000 / (paceMinPerKm * 60);   // m/s
+                  } else {
+                    const speedKmh = speed[0];               // e.g. 20 km/h
+                    durationInSeconds = Math.round((distanceKm / speedKmh) * 3600); // km ÷ km/h × 3600s
+                    avgSpeed = speedKmh / 3.6;               // m/s
+                  }
+
+                  // Interpolate points for realistic GPX + apply natural GPS drift/jitter
+                  const rawInterpolated = interpolateRoutePoints(coordinates, 10); // 10 meters spacing
+                  const driftAmount = gpsRealism === "high" ? 3.0 : gpsRealism === "natural" ? 1.8 : 0;
+                  const interpolatedCoords = applyGpsDrift(rawInterpolated, driftAmount);
                   const n = interpolatedCoords.length;
                   const creatorString = gpxCreator === "Garmin" ? (garminModel.trim() ? garminModel.trim() : "Garmin") : gpxCreator;
+                  const activityNameFinal = trimmedName;
                   const gpxContent = `<?xml version="1.0" encoding="UTF-8"?>
 <gpx xmlns="http://www.topografix.com/GPX/1/1" 
   xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1"
@@ -491,12 +571,12 @@ export default function Home() {
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd http://www.garmin.com/xmlschemas/TrackPointExtension/v1 http://www.garmin.com/xmlschemas/TrackPointExtensionv1.xsd">
     <metadata>
-      <name>${activityName}</name>
+      <name>${activityNameFinal}</name>
       <desc>${activityDesc}</desc>
-      <time>${toLocalISOString(startDate)}</time>
+      <time>${buildGpxTimestamp(refDate, startHour, startMinute, 0)}</time>
     </metadata>
     <trk>
-      <name>${activityName}</name>
+      <name>${activityNameFinal}</name>
       <desc>${activityDesc}</desc>
       <type>${activityType === "run" ? "running" : "cycling"}</type>
       <extensions>
@@ -512,7 +592,6 @@ export default function Home() {
       <trkseg>
 ${interpolatedCoords.map(([lon, lat], index) => {
           // Distribute time so last point is exactly at start + duration
-          const pointTime = new Date(startDate);
           let secondsFromStart = 0;
           if (n > 1) {
             if (index === n - 1) {
@@ -521,14 +600,13 @@ ${interpolatedCoords.map(([lon, lat], index) => {
               secondsFromStart = Math.round((index / (n - 1)) * durationInSeconds);
             }
           }
-          pointTime.setSeconds(pointTime.getSeconds() + secondsFromStart);
-          // Calculate elevation (optional, can be 0)
-          const elevation = 0;
+          // Calculate elevation (realistic rolling terrain elevation profile)
+          const elevation = Math.round(15 + Math.sin(index * 0.1) * 6 + ((Math.sin(index * 0.03) + 1) * 3));
           // Calculate point-specific speed (slightly vary around average)
           const pointSpeed = avgSpeed * (0.95 + (Math.random() * 0.1)); // ±5% variation
           return `      <trkpt lat="${lat}" lon="${lon}">
         <ele>${elevation}</ele>
-        <time>${toLocalISOString(pointTime)}</time>
+        <time>${buildGpxTimestamp(refDate, startHour, startMinute, secondsFromStart)}</time>
         <extensions>
           <gpxtpx:TrackPointExtension>
             <gpxtpx:speed>${pointSpeed.toFixed(2)}</gpxtpx:speed>
@@ -545,7 +623,7 @@ ${interpolatedCoords.map(([lon, lat], index) => {
                   const url = URL.createObjectURL(blob);
                   const link = document.createElement('a');
                   link.href = url;
-                  link.download = `${activityName.toLowerCase().replace(/\s+/g, '-')}.gpx`;
+                  link.download = `${activityNameFinal.toLowerCase().replace(/\s+/g, '-')}.gpx`;
                   document.body.appendChild(link);
                   link.click();
                   document.body.removeChild(link);
