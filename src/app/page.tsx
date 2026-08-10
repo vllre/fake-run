@@ -534,32 +534,52 @@ export default function Home() {
                   // Use the selected date (or today) as reference for year/month/day only
                   const refDate = date || new Date();
 
-                  // --- Pace / Speed → Duration ---
-                  // Always recalculate from the slider values at download time.
-                  // routeStats.duration can be stale (Map uses its own hardcoded 5.5 min/km).
-                  // Strava derives pace entirely from trackpoint <time> timestamps,
-                  // so durationInSeconds is the ONLY thing that controls displayed pace.
-                  const distanceKm = routeStats.distance;
-                  const distanceInMeters = Math.round(distanceKm * 1000);
-
-                  let durationInSeconds: number;
-                  let avgSpeed: number; // m/s
-
-                  if (activityType === "run") {
-                    const paceMinPerKm = pace[0];            // e.g. 5.5 min/km
-                    durationInSeconds = Math.round(distanceKm * paceMinPerKm * 60); // km × min/km × 60s
-                    avgSpeed = 1000 / (paceMinPerKm * 60);   // m/s
-                  } else {
-                    const speedKmh = speed[0];               // e.g. 20 km/h
-                    durationInSeconds = Math.round((distanceKm / speedKmh) * 3600); // km ÷ km/h × 3600s
-                    avgSpeed = speedKmh / 3.6;               // m/s
-                  }
-
                   // Interpolate points for realistic GPX + apply natural GPS drift/jitter
                   const rawInterpolated = interpolateRoutePoints(coordinates, 10); // 10 meters spacing
                   const driftAmount = gpsRealism === "high" ? 3.0 : gpsRealism === "natural" ? 1.8 : 0;
                   const interpolatedCoords = applyGpsDrift(rawInterpolated, driftAmount);
                   const n = interpolatedCoords.length;
+
+                  // --- Calculate Exact Cumulative Distance Along the Drifted Track ---
+                  // Strava recalculates total distance by summing distances between all <trkpt> points.
+                  // By measuring cumulative distance after drift, time distribution matches actual geometry.
+                  let totalTrackDistanceMeters = 0;
+                  const cumDistMeters: number[] = [0];
+                  const toRad = (deg: number) => deg * Math.PI / 180;
+                  const R_EARTH = 6371000;
+
+                  for (let i = 1; i < n; i++) {
+                    const [lon1, lat1] = interpolatedCoords[i - 1];
+                    const [lon2, lat2] = interpolatedCoords[i];
+                    const dLat = toRad(lat2 - lat1);
+                    const dLon = toRad(lon2 - lon1);
+                    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                    const segDist = R_EARTH * c;
+                    totalTrackDistanceMeters += segDist;
+                    cumDistMeters.push(totalTrackDistanceMeters);
+                  }
+
+                  const totalTrackKm = totalTrackDistanceMeters / 1000;
+
+                  // --- Pace / Speed → Duration ---
+                  // Calculate duration in seconds based on the actual track distance Strava will read
+                  let durationInSeconds: number;
+                  let avgSpeed: number; // m/s
+
+                  if (activityType === "run") {
+                    const paceMinPerKm = pace[0]; // e.g. 5.5 min/km
+                    durationInSeconds = Math.round(totalTrackKm * paceMinPerKm * 60); // km × min/km × 60s
+                    avgSpeed = totalTrackDistanceMeters / (durationInSeconds || 1); // m/s
+                  } else {
+                    const speedKmh = speed[0]; // e.g. 20 km/h
+                    durationInSeconds = Math.round((totalTrackKm / speedKmh) * 3600); // km ÷ km/h × 3600s
+                    avgSpeed = speedKmh / 3.6; // m/s
+                  }
+
+                  if (durationInSeconds < 1) durationInSeconds = 1;
+                  const distanceInMeters = Math.round(totalTrackDistanceMeters);
+
                   const creatorString = gpxCreator === "Garmin" ? (garminModel.trim() ? garminModel.trim() : "Garmin") : gpxCreator;
                   const activityNameFinal = trimmedName;
                   const gpxContent = `<?xml version="1.0" encoding="UTF-8"?>
@@ -585,19 +605,19 @@ export default function Home() {
           <gpxx:TimerTime>${durationInSeconds}</gpxx:TimerTime>
           <gpxx:MovingTime>${durationInSeconds}</gpxx:MovingTime>
           <gpxx:StoppedTime>0</gpxx:StoppedTime>
-          <gpxx:MaxSpeed>${avgSpeed}</gpxx:MaxSpeed>
-          <gpxx:AverageSpeed>${avgSpeed}</gpxx:AverageSpeed>
+          <gpxx:MaxSpeed>${avgSpeed.toFixed(2)}</gpxx:MaxSpeed>
+          <gpxx:AverageSpeed>${avgSpeed.toFixed(2)}</gpxx:AverageSpeed>
         </gpxx:TrackStatsExtension>
       </extensions>
       <trkseg>
 ${interpolatedCoords.map(([lon, lat], index) => {
-          // Distribute time so last point is exactly at start + duration
+          // Distribute time proportionally to cumulative distance traveled along the track
           let secondsFromStart = 0;
-          if (n > 1) {
+          if (n > 1 && totalTrackDistanceMeters > 0) {
             if (index === n - 1) {
               secondsFromStart = durationInSeconds;
             } else {
-              secondsFromStart = Math.round((index / (n - 1)) * durationInSeconds);
+              secondsFromStart = Math.round((cumDistMeters[index] / totalTrackDistanceMeters) * durationInSeconds);
             }
           }
           // Calculate elevation (realistic rolling terrain elevation profile)

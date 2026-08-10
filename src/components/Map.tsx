@@ -393,54 +393,95 @@ export default function Map({
     onRouteUpdate?.([], { distance: 0, duration: 0, elevationGain: 0 })
   }
 
-  // Smarter road alignment using OSRM Match API (snaps each point to nearest road)
-  // Falls back to Route API if match fails
+  // Road alignment using OSRM Route API (treats user points as waypoints)
+  // Falls back to Match API if route fails, with segment-by-segment fallback for long routes
   const alignToRoads = async () => {
     if (coordinates.length < 2) return
     setIsAligning(true)
     setError(null)
 
-    const coordStr = coordinates.map(c => c.join(',')).join(';')
-    // Radiuses: allow each point to snap up to 50m from its placed position
-    const radiuses = coordinates.map(() => '50').join(';')
+    // Use smaller snap radius (25m) to avoid snapping to wrong roads in dense areas
+    const radiuses = coordinates.map(() => '25').join(';')
 
     try {
-      // Try OSRM Match API first — best for snapping arbitrary GPS points to roads
-      const matchUrl =
-        `https://router.project-osrm.org/match/v1/walking/${coordStr}` +
-        `?overview=full&geometries=geojson&tidy=true&radiuses=${radiuses}`
-
       let alignedCoords: Coordinate[] | null = null
 
-      const matchRes = await fetch(matchUrl)
-      if (matchRes.ok) {
-        const matchData = await matchRes.json()
-        if (matchData.matchings && matchData.matchings[0]) {
-          alignedCoords = matchData.matchings[0].geometry.coordinates as Coordinate[]
+      // --- Strategy 1: OSRM Route API (segment-by-segment for accuracy) ---
+      // Route each consecutive pair of points independently, then stitch.
+      // This ensures the path goes through the user's clicked points without
+      // OSRM rerouting through shortcuts between far-apart waypoints.
+      if (coordinates.length >= 2) {
+        const segments: Coordinate[][] = []
+        let segmentFailed = false
+
+        for (let i = 0; i < coordinates.length - 1; i++) {
+          const segCoordStr = `${coordinates[i].join(',')};${coordinates[i + 1].join(',')}`
+          const segUrl =
+            `https://router.project-osrm.org/route/v1/foot/${segCoordStr}` +
+            `?overview=full&geometries=geojson`
+          try {
+            const res = await fetch(segUrl)
+            if (!res.ok) { segmentFailed = true; break }
+            const data = await res.json()
+            if (!data.routes?.[0]) { segmentFailed = true; break }
+            const segCoords = data.routes[0].geometry.coordinates as Coordinate[]
+            // Avoid duplicating the shared point between segments
+            if (i === 0) {
+              segments.push(segCoords)
+            } else {
+              segments.push(segCoords.slice(1))
+            }
+          } catch {
+            segmentFailed = true
+            break
+          }
+        }
+
+        if (!segmentFailed && segments.length > 0) {
+          alignedCoords = segments.flat() as Coordinate[]
         }
       }
 
-      // Fallback to Route API if match didn't work
+      // --- Strategy 2: Full-route OSRM Route API (all waypoints at once) ---
       if (!alignedCoords) {
+        const coordStr = coordinates.map(c => c.join(',')).join(';')
         const routeUrl =
           `https://router.project-osrm.org/route/v1/foot/${coordStr}` +
           `?overview=full&geometries=geojson`
         const routeRes = await fetch(routeUrl)
-        if (!routeRes.ok) throw new Error('Both match and route APIs failed')
-        const routeData = await routeRes.json()
-        if (!routeData.routes?.[0]) throw new Error('No route found')
-        alignedCoords = routeData.routes[0].geometry.coordinates as Coordinate[]
+        if (routeRes.ok) {
+          const routeData = await routeRes.json()
+          if (routeData.routes?.[0]) {
+            alignedCoords = routeData.routes[0].geometry.coordinates as Coordinate[]
+          }
+        }
       }
 
-      if (!map.current || !alignedCoords) return
+      // --- Strategy 3: OSRM Match API (last resort — designed for GPS traces) ---
+      if (!alignedCoords) {
+        const coordStr = coordinates.map(c => c.join(',')).join(';')
+        const matchUrl =
+          `https://router.project-osrm.org/match/v1/walking/${coordStr}` +
+          `?overview=full&geometries=geojson&tidy=true&radiuses=${radiuses}`
+        const matchRes = await fetch(matchUrl)
+        if (matchRes.ok) {
+          const matchData = await matchRes.json()
+          if (matchData.matchings?.[0]) {
+            alignedCoords = matchData.matchings[0].geometry.coordinates as Coordinate[]
+          }
+        }
+      }
+
+      if (!alignedCoords) throw new Error('All alignment strategies failed')
+      if (!map.current) return
 
       // Save clean OSRM coords (no drift yet) so useEffect can re-apply reactively
-      const interpolatedClean = interpolateRoutePoints(alignedCoords, 10);
-      rawAlignedCoordsRef.current = interpolatedClean;
+      const interpolatedClean = interpolateRoutePoints(alignedCoords, 10)
+      rawAlignedCoordsRef.current = interpolatedClean
 
       // Apply GPS drift based on current realism setting
-      const driftAmount = gpsRealism === "high" ? 7.0 : gpsRealism === "natural" ? 4.0 : 0;
-      const finalCoords = driftAmount > 0 ? applyGpsDrift(interpolatedClean, driftAmount) : interpolatedClean;
+      const driftAmount = gpsRealism === "high" ? 7.0 : gpsRealism === "natural" ? 4.0 : 0
+      const finalCoords = driftAmount > 0 ? applyGpsDrift(interpolatedClean, driftAmount) : interpolatedClean
 
       // Update route line with full aligned path (including realistic coretan GPS drift)
       coordinatesRef.current = finalCoords
@@ -456,7 +497,7 @@ export default function Map({
       onRouteUpdate?.(finalCoords, stats)
     } catch (err) {
       console.error('Error aligning to roads:', err)
-      setError('Failed to align route to roads. Try adding more points near roads.')
+      setError('Gagal align ke jalan. Coba tambah titik lebih dekat ke jalan yang dituju.')
     } finally {
       setIsAligning(false)
     }
