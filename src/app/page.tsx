@@ -54,6 +54,8 @@ export default function Home() {
   const [startHour, setStartHour] = useState("07")
   const [startMinute, setStartMinute] = useState("00")
   const [gpsRealism, setGpsRealism] = useState("natural") // 'natural', 'high', 'off'
+  const [useCustomSplits, setUseCustomSplits] = useState(false)
+  const [splitPaces, setSplitPaces] = useState<string[]>([]) // pace per km in "MM:SS" format
   const gpxCreatorOptions = [
     { label: "Strava GPX", value: "StravaGPX" },
     { label: "Garmin", value: "Garmin" },
@@ -147,6 +149,36 @@ export default function Home() {
     }
   }
 
+  // Parse "MM:SS" → decimal minutes, fallback to global pace
+  const parseSplitPace = (val: string): number => {
+    const match = val.match(/^(\d+):([0-5]\d)$/);
+    if (match) return parseInt(match[1]) + parseInt(match[2]) / 60;
+    const num = parseFloat(val);
+    return isNaN(num) ? pace[0] : num;
+  }
+
+  // Returns per-km pace (decimal min/km) for each split index
+  const getEffectiveSplitPaces = (totalKm: number): number[] => {
+    const totalSplits = Math.ceil(totalKm);
+    return Array.from({ length: totalSplits }, (_, i) => {
+      if (useCustomSplits && splitPaces[i] !== undefined && splitPaces[i].trim() !== "") {
+        return parseSplitPace(splitPaces[i]);
+      }
+      return pace[0];
+    });
+  }
+
+  // Sync split count when route distance changes and custom splits are enabled
+  const syncSplitCount = (distanceKm: number) => {
+    if (!useCustomSplits) return;
+    const needed = Math.ceil(distanceKm);
+    setSplitPaces(prev => {
+      const next = [...prev];
+      while (next.length < needed) next.push("");
+      return next.slice(0, needed);
+    });
+  }
+
   const handleSpeedChange = (newSpeed: number[]) => {
     setSpeed(newSpeed)
     if (activityType === "bike") {
@@ -163,6 +195,7 @@ export default function Home() {
       ...stats,
       duration: activityType === "run" ? stats.distance * pace[0] : stats.distance / speed[0] * 60
     })
+    syncSplitCount(stats.distance)
   }
 
   // Build a proper UTC ISO string from a local Date + user-selected hour/minute.
@@ -391,6 +424,52 @@ export default function Home() {
                 )}
               </div>
 
+              {/* ── Custom Split Pace ── */}
+              {activityType === "run" && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-sm font-medium">Custom Split Pace</label>
+                    <Switch
+                      checked={useCustomSplits}
+                      onCheckedChange={(checked: boolean) => {
+                        setUseCustomSplits(checked);
+                        if (checked) {
+                          const needed = Math.ceil(routeStats.distance);
+                          setSplitPaces(Array.from({ length: needed }, (_, i) => splitPaces[i] ?? ""));
+                        }
+                      }}
+                    />
+                  </div>
+                  {useCustomSplits && routeStats.distance > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-gray-500">Isi pace tiap km (format MM:SS atau desimal). Kosongkan untuk pakai pace global.</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {Array.from({ length: Math.ceil(routeStats.distance) }, (_, i) => (
+                          <div key={i} className="flex items-center gap-1">
+                            <span className="text-xs text-gray-500 w-12 shrink-0">km {i + 1}</span>
+                            <Input
+                              value={splitPaces[i] ?? ""}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                setSplitPaces(prev => {
+                                  const next = [...prev];
+                                  next[i] = e.target.value;
+                                  return next;
+                                });
+                              }}
+                              placeholder={pace[0].toFixed(1)}
+                              className="h-8 text-sm"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {useCustomSplits && routeStats.distance === 0 && (
+                    <p className="text-xs text-gray-400 mt-1">Gambar rute dulu di peta untuk mengisi split.</p>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className="text-sm font-medium">{activityType === "run" ? "Run Name" : "Ride Name"}</label>
                 <Input
@@ -567,10 +646,28 @@ export default function Home() {
                   let durationInSeconds: number;
                   let avgSpeed: number; // m/s
 
+                  // Build per-point cumulative-seconds array for custom splits (run only)
+                  const cumSecondsPerPoint: number[] = new Array(n).fill(0);
+
                   if (activityType === "run") {
-                    const paceMinPerKm = pace[0]; // e.g. 5.5 min/km
-                    durationInSeconds = Math.round(totalTrackKm * paceMinPerKm * 60); // km × min/km × 60s
-                    avgSpeed = totalTrackDistanceMeters / (durationInSeconds || 1); // m/s
+                    if (useCustomSplits) {
+                      const splitPaceValues = getEffectiveSplitPaces(totalTrackKm); // min/km per split
+                      // Assign seconds to each point based on which km-split it falls in
+                      for (let i = 1; i < n; i++) {
+                        const kmSoFar = cumDistMeters[i] / 1000;
+                        const kmPrev  = cumDistMeters[i - 1] / 1000;
+                        const segKm   = kmSoFar - kmPrev;
+                        // Which km-split does this segment's midpoint belong to?
+                        const splitIdx = Math.min(Math.floor((kmPrev + kmSoFar) / 2), splitPaceValues.length - 1);
+                        const segSeconds = segKm * splitPaceValues[splitIdx] * 60;
+                        cumSecondsPerPoint[i] = cumSecondsPerPoint[i - 1] + segSeconds;
+                      }
+                      durationInSeconds = Math.round(cumSecondsPerPoint[n - 1]);
+                    } else {
+                      const paceMinPerKm = pace[0];
+                      durationInSeconds = Math.round(totalTrackKm * paceMinPerKm * 60);
+                    }
+                    avgSpeed = totalTrackDistanceMeters / (durationInSeconds || 1);
                   } else {
                     const speedKmh = speed[0]; // e.g. 20 km/h
                     durationInSeconds = Math.round((totalTrackKm / speedKmh) * 3600); // km ÷ km/h × 3600s
@@ -611,11 +708,13 @@ export default function Home() {
       </extensions>
       <trkseg>
 ${interpolatedCoords.map(([lon, lat], index) => {
-          // Distribute time proportionally to cumulative distance traveled along the track
+          // Distribute time: custom splits use per-split paced seconds; else proportional
           let secondsFromStart = 0;
           if (n > 1 && totalTrackDistanceMeters > 0) {
             if (index === n - 1) {
               secondsFromStart = durationInSeconds;
+            } else if (activityType === "run" && useCustomSplits) {
+              secondsFromStart = Math.round(cumSecondsPerPoint[index]);
             } else {
               secondsFromStart = Math.round((cumDistMeters[index] / totalTrackDistanceMeters) * durationInSeconds);
             }
