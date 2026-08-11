@@ -56,6 +56,7 @@ export default function Home() {
   const [gpsRealism, setGpsRealism] = useState("natural") // 'natural', 'high', 'off'
   const [useCustomSplits, setUseCustomSplits] = useState(false)
   const [splitPaces, setSplitPaces] = useState<string[]>([]) // pace per km in "MM:SS" format
+  const [showSplitPreview, setShowSplitPreview] = useState(false)
   const gpxCreatorOptions = [
     { label: "Strava GPX", value: "StravaGPX" },
     { label: "Garmin", value: "Garmin" },
@@ -176,6 +177,68 @@ export default function Home() {
       const next = [...prev];
       while (next.length < needed) next.push("");
       return next.slice(0, needed);
+    });
+  }
+
+  // Format decimal minutes as MM:SS string
+  const formatPaceMMSS = (decimalMin: number): string => {
+    const m = Math.floor(decimalMin);
+    const s = Math.round((decimalMin - m) * 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  // Format seconds as H:MM:SS
+  const formatSeconds = (secs: number): string => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    if (h > 0) return `${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+    return `${m}:${s.toString().padStart(2,'0')}`;
+  }
+
+  // Apply a split preset: 'negative' (faster each km), 'positive' (slower), 'even'
+  const applySplitPreset = (preset: 'negative' | 'positive' | 'even') => {
+    const totalKm = routeStats.distance;
+    if (totalKm <= 0) return;
+    const n = Math.ceil(totalKm);
+    const basePace = pace[0]; // min/km
+    // Variation: ±15% spread across splits, step per km
+    const spread = basePace * 0.15;
+    const newPaces = Array.from({ length: n }, (_, i) => {
+      if (preset === 'even') return basePace;
+      const frac = n > 1 ? i / (n - 1) : 0; // 0..1
+      if (preset === 'negative') {
+        // Start slow, end fast: basePace+spread → basePace-spread
+        return basePace + spread - frac * 2 * spread;
+      } else {
+        // Start fast, end slow: basePace-spread → basePace+spread
+        return basePace - spread + frac * 2 * spread;
+      }
+    });
+    setSplitPaces(newPaces.map(p => formatPaceMMSS(Math.max(3, Math.min(12, p)))));
+    if (!useCustomSplits) setUseCustomSplits(true);
+  }
+
+  // Compute the live split preview rows from current splitPaces + pace
+  const computeSplitPreview = () => {
+    const totalKm = routeStats.distance;
+    if (totalKm <= 0) return [];
+    const n = Math.ceil(totalKm);
+    let cumulativeSec = 0;
+    return Array.from({ length: n }, (_, i) => {
+      const kmDist = i < n - 1 ? 1.0 : (totalKm - Math.floor(totalKm) || 1.0);
+      const effectivePace = (useCustomSplits && splitPaces[i]?.trim())
+        ? parseSplitPace(splitPaces[i])
+        : pace[0];
+      const splitSec = Math.round(kmDist * effectivePace * 60);
+      cumulativeSec += splitSec;
+      return {
+        km: i + 1,
+        dist: kmDist,
+        pace: effectivePace,
+        splitSec,
+        cumulativeSec,
+      };
     });
   }
 
@@ -426,8 +489,8 @@ export default function Home() {
 
               {/* ── Custom Split Pace ── */}
               {activityType === "run" && (
-                <div>
-                  <div className="flex items-center justify-between mb-2">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
                     <label className="text-sm font-medium">Custom Split Pace</label>
                     <Switch
                       checked={useCustomSplits}
@@ -440,9 +503,40 @@ export default function Home() {
                       }}
                     />
                   </div>
+
+                  {/* Preset buttons */}
+                  {routeStats.distance > 0 && (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => applySplitPreset('negative')}
+                        className="flex-1 text-xs px-2 py-1.5 rounded border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 transition-colors font-medium"
+                        title="Pace makin cepat tiap km (ideal race strategy)"
+                      >
+                        ↘ Negative
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applySplitPreset('even')}
+                        className="flex-1 text-xs px-2 py-1.5 rounded border border-gray-300 bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors font-medium"
+                        title="Pace sama tiap km"
+                      >
+                        → Even
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applySplitPreset('positive')}
+                        className="flex-1 text-xs px-2 py-1.5 rounded border border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100 transition-colors font-medium"
+                        title="Pace makin lambat tiap km"
+                      >
+                        ↗ Positive
+                      </button>
+                    </div>
+                  )}
+
                   {useCustomSplits && routeStats.distance > 0 && (
                     <div className="space-y-2">
-                      <p className="text-xs text-gray-500">Isi pace tiap km (format MM:SS atau desimal). Kosongkan untuk pakai pace global.</p>
+                      <p className="text-xs text-gray-500">Format MM:SS atau desimal. Kosongkan = pakai pace global.</p>
                       <div className="grid grid-cols-2 gap-2">
                         {Array.from({ length: Math.ceil(routeStats.distance) }, (_, i) => (
                           <div key={i} className="flex items-center gap-1">
@@ -456,7 +550,7 @@ export default function Home() {
                                   return next;
                                 });
                               }}
-                              placeholder={pace[0].toFixed(1)}
+                              placeholder={formatPaceMMSS(pace[0])}
                               className="h-8 text-sm"
                             />
                           </div>
@@ -465,7 +559,60 @@ export default function Home() {
                     </div>
                   )}
                   {useCustomSplits && routeStats.distance === 0 && (
-                    <p className="text-xs text-gray-400 mt-1">Gambar rute dulu di peta untuk mengisi split.</p>
+                    <p className="text-xs text-gray-400">Gambar rute dulu di peta untuk mengisi split.</p>
+                  )}
+                </div>
+              )}
+
+              {/* ── Split Preview Table ── */}
+              {activityType === "run" && routeStats.distance > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowSplitPreview(v => !v)}
+                    className="w-full flex items-center justify-between text-sm font-medium text-gray-700 hover:text-orange-600 transition-colors py-1"
+                  >
+                    <span>📊 Preview Split</span>
+                    <span className="text-xs text-gray-400">{showSplitPreview ? '▲ Tutup' : '▼ Lihat'}</span>
+                  </button>
+                  {showSplitPreview && (
+                    <div className="mt-2 rounded-lg border border-gray-200 overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-200">
+                            <th className="text-left px-2 py-1.5 font-semibold text-gray-600">km</th>
+                            <th className="text-center px-2 py-1.5 font-semibold text-gray-600">Pace</th>
+                            <th className="text-right px-2 py-1.5 font-semibold text-gray-600">Finish</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {computeSplitPreview().map((row, idx) => {
+                            const isLast = idx === computeSplitPreview().length - 1;
+                            return (
+                              <tr
+                                key={row.km}
+                                className={cn(
+                                  "border-b border-gray-100 last:border-0",
+                                  isLast ? "bg-orange-50" : idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"
+                                )}
+                              >
+                                <td className="px-2 py-1.5 text-gray-700 font-medium">
+                                  {isLast && row.dist < 1
+                                    ? `${(row.dist * 1000).toFixed(0)}m`
+                                    : `km ${row.km}`}
+                                </td>
+                                <td className="px-2 py-1.5 text-center font-mono text-gray-800">
+                                  {formatPaceMMSS(row.pace)}
+                                </td>
+                                <td className="px-2 py-1.5 text-right font-mono text-gray-800">
+                                  {formatSeconds(row.cumulativeSec)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </div>
               )}
