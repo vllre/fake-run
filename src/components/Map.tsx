@@ -32,6 +32,7 @@ interface MapProps {
   onSearchQueryChange?: (query: string) => void;
   onSearchSelect?: (result: SearchResult) => void;
   gpsRealism?: string;
+  importedCoords?: Coordinate[];
 }
 
 interface SearchResult {
@@ -58,7 +59,8 @@ export default function Map({
   searchQuery = "", 
   onSearchQueryChange,
   onSearchSelect,
-  gpsRealism = "natural"
+  gpsRealism = "natural",
+  importedCoords
 }: MapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
@@ -74,6 +76,34 @@ export default function Map({
   const [error, setError] = useState<string | null>(null)
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
+
+  // Handle imported GPX coordinates
+  useEffect(() => {
+    if (!importedCoords || importedCoords.length === 0 || !map.current || !mapLoaded) return;
+
+    markersRef.current.forEach(m => m.marker.remove());
+    markersRef.current = [];
+
+    rawAlignedCoordsRef.current = importedCoords;
+    coordinatesRef.current = importedCoords;
+    setCoordinates(importedCoords);
+    setIsAligned(true);
+    setShowAlignButton(false);
+    updateRouteLine(importedCoords);
+
+    try {
+      const bounds = new maplibregl.LngLatBounds();
+      importedCoords.forEach(c => bounds.extend(c));
+      map.current.fitBounds(bounds, { padding: 40, maxZoom: 15 });
+    } catch (e) {
+      console.warn("Could not fit bounds to imported coords:", e);
+    }
+
+    calculateRouteStats(importedCoords).then(stats => {
+      onRouteUpdate?.(importedCoords, stats);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [importedCoords, mapLoaded]);
 
   // Handle search input changes with OpenStreetMap Nominatim
   useEffect(() => {

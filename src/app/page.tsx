@@ -56,7 +56,11 @@ export default function Home() {
   const [gpsRealism, setGpsRealism] = useState("natural") // 'natural', 'high', 'off'
   const [useCustomSplits, setUseCustomSplits] = useState(false)
   const [splitPaces, setSplitPaces] = useState<string[]>([]) // pace per km in "MM:SS" format
+  const [walkSplits, setWalkSplits] = useState<boolean[]>([]) // track which splits are walk/rest
+  const [targetHr, setTargetHr] = useState([160]) // target average HR (bpm)
   const [showSplitPreview, setShowSplitPreview] = useState(false)
+  const [importedCoords, setImportedCoords] = useState<Coordinate[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const gpxCreatorOptions = [
     { label: "Strava GPX", value: "StravaGPX" },
     { label: "Garmin", value: "Garmin" },
@@ -178,6 +182,11 @@ export default function Home() {
       while (next.length < needed) next.push("");
       return next.slice(0, needed);
     });
+    setWalkSplits(prev => {
+      const next = [...prev];
+      while (next.length < needed) next.push(false);
+      return next.slice(0, needed);
+    });
   }
 
   // Format decimal minutes as MM:SS string
@@ -216,6 +225,7 @@ export default function Home() {
       }
     });
     setSplitPaces(newPaces.map(p => formatPaceMMSS(Math.max(3, Math.min(12, p)))));
+    setWalkSplits(new Array(n).fill(false));
     if (!useCustomSplits) setUseCustomSplits(true);
   }
 
@@ -227,9 +237,10 @@ export default function Home() {
     let cumulativeSec = 0;
     return Array.from({ length: n }, (_, i) => {
       const kmDist = i < n - 1 ? 1.0 : (totalKm - Math.floor(totalKm) || 1.0);
+      const isWalk = walkSplits[i] ?? false;
       const effectivePace = (useCustomSplits && splitPaces[i]?.trim())
         ? parseSplitPace(splitPaces[i])
-        : pace[0];
+        : isWalk ? 10.0 : pace[0];
       const splitSec = Math.round(kmDist * effectivePace * 60);
       cumulativeSec += splitSec;
       return {
@@ -238,8 +249,34 @@ export default function Home() {
         pace: effectivePace,
         splitSec,
         cumulativeSec,
+        isWalk,
       };
     });
+  }
+
+  // Calculate dynamic effective total duration & average pace for Run (updates live when split paces change)
+  const getEffectiveRunStats = () => {
+    if (activityType !== "run" || routeStats.distance === 0) {
+      return {
+        durationMinutes: routeStats.duration,
+        avgPaceMinKm: pace[0],
+      };
+    }
+
+    if (useCustomSplits) {
+      const preview = computeSplitPreview();
+      if (preview.length > 0) {
+        const totalSec = preview[preview.length - 1].cumulativeSec;
+        const durationMinutes = totalSec / 60;
+        const avgPaceMinKm = durationMinutes / routeStats.distance;
+        return { durationMinutes, avgPaceMinKm };
+      }
+    }
+
+    return {
+      durationMinutes: routeStats.distance * pace[0],
+      avgPaceMinKm: pace[0],
+    };
   }
 
   const handleSpeedChange = (newSpeed: number[]) => {
@@ -259,6 +296,68 @@ export default function Home() {
       duration: activityType === "run" ? stats.distance * pace[0] : stats.distance / speed[0] * 60
     })
     syncSplitCount(stats.distance)
+  }
+
+  // Handle GPX File Upload (Replay Route)
+  const handleGpxImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const xmlText = event.target?.result as string;
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, "application/xml");
+
+        // Look for trkpt elements first, then wpt elements
+        const trkptNodes = Array.from(xmlDoc.getElementsByTagName("trkpt"));
+        const wptNodes = Array.from(xmlDoc.getElementsByTagName("wpt"));
+        const nodes = trkptNodes.length > 0 ? trkptNodes : wptNodes;
+
+        if (nodes.length < 2) {
+          alert("File GPX tidak berisi rute koordinat yang cukup.");
+          return;
+        }
+
+        const coords: Coordinate[] = [];
+        for (const node of nodes) {
+          const lat = parseFloat(node.getAttribute("lat") || "");
+          const lon = parseFloat(node.getAttribute("lon") || "");
+          if (!isNaN(lat) && !isNaN(lon)) {
+            coords.push([lon, lat]);
+          }
+        }
+
+        if (coords.length < 2) {
+          alert("Format koordinat dalam file GPX tidak valid.");
+          return;
+        }
+
+        // Extract activity name from <name> tag if present
+        const nameTags = xmlDoc.getElementsByTagName("name");
+        if (nameTags.length > 0 && nameTags[0].textContent) {
+          const nameText = nameTags[0].textContent.trim();
+          if (nameText) setActivityName(nameText);
+        }
+
+        // Extract description from <desc> tag if present
+        const descTags = xmlDoc.getElementsByTagName("desc");
+        if (descTags.length > 0 && descTags[0].textContent) {
+          const descText = descTags[0].textContent.trim();
+          if (descText) setActivityDesc(descText);
+        }
+
+        setCoordinates(coords);
+        setImportedCoords(coords);
+
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      } catch (err) {
+        console.error("Gagal membaca file GPX:", err);
+        alert("Gagal membaca file GPX. Pastikan file berformat .gpx yang valid.");
+      }
+    };
+    reader.readAsText(file);
   }
 
   // Build a proper UTC ISO string from a local Date + user-selected hour/minute.
@@ -374,9 +473,28 @@ export default function Home() {
       <div className="flex flex-col md:flex-row flex-1 w-full">
         {/* Map Section */}
         <div className="w-full md:w-2/3 p-2 md:p-4 flex flex-col">
-          <div className="mb-2 md:mb-4">
-            <h1 className="text-xl md:text-2xl font-bold mb-1 md:mb-2">Draw Your Route</h1>
-            <p className="text-gray-600 text-sm md:text-base">Search for a location and tap/click on the map to create your route</p>
+          <div className="mb-2 md:mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold mb-1">Draw or Replay Route</h1>
+              <p className="text-gray-600 text-sm">Search for a location, tap/click on map, or upload existing GPX file</p>
+            </div>
+            <div className="shrink-0">
+              <input
+                type="file"
+                accept=".gpx"
+                ref={fileInputRef}
+                onChange={handleGpxImport}
+                className="hidden"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                className="border-orange-500 text-orange-600 hover:bg-orange-50 font-medium text-sm gap-1.5 shadow-sm"
+              >
+                📂 Import GPX (Replay)
+              </Button>
+            </div>
           </div>
           <div className="flex-1 min-h-[300px] md:min-h-[600px]">
             <Map 
@@ -387,6 +505,7 @@ export default function Home() {
                 setSearchQuery(result.place_name)
               }}
               gpsRealism={gpsRealism}
+              importedCoords={importedCoords}
             />
           </div>
         </div>
@@ -434,34 +553,42 @@ export default function Home() {
 
               <div>
                 <h3 className="text-lg font-semibold mb-4">{activityType === "run" ? "Run Stats" : "Ride Stats"}</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="text-center">
-                    <div className="text-3xl font-bold">{formatDistance(routeStats.distance)}</div>
-                    <div className="text-sm text-gray-500">Distance</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold">{formatDuration(routeStats.duration)}</div>
-                    <div className="text-sm text-gray-500">Duration</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold">{Math.round(routeStats.elevationGain)}m</div>
-                    <div className="text-sm text-gray-500">Elevation Gain</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold">
-                      {activityType === "run"
-                        ? paceUnit === "min/km"
-                          ? pace[0].toFixed(2)
-                          : (60 / pace[0]).toFixed(1)
-                        : speedUnit === "km/h"
-                          ? speed[0].toFixed(1)
-                          : (speed[0] / 1.60934).toFixed(1)}
+                {(() => {
+                  const runStatsEffective = getEffectiveRunStats();
+                  const displayDurationMinutes = activityType === "run" ? runStatsEffective.durationMinutes : routeStats.duration;
+                  return (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="text-center">
+                        <div className="text-3xl font-bold">{formatDistance(routeStats.distance)}</div>
+                        <div className="text-sm text-gray-500">Distance</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-3xl font-bold">{formatDuration(displayDurationMinutes)}</div>
+                        <div className="text-sm text-gray-500">Duration</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-3xl font-bold">{Math.round(routeStats.elevationGain)}m</div>
+                        <div className="text-sm text-gray-500">Elevation Gain</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-3xl font-bold">
+                          {activityType === "run"
+                            ? paceUnit === "min/km"
+                              ? formatPaceMMSS(runStatsEffective.avgPaceMinKm)
+                              : (60 / runStatsEffective.avgPaceMinKm).toFixed(1)
+                            : speedUnit === "km/h"
+                              ? speed[0].toFixed(1)
+                              : (speed[0] / 1.60934).toFixed(1)}
+                        </div>
+                        <div className="text-sm text-gray-500">
+                          {activityType === "run"
+                            ? `${paceUnit}${useCustomSplits ? " (Avg)" : ""}`
+                            : speedUnit}
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-sm text-gray-500">
-                      {activityType === "run" ? paceUnit : speedUnit}
-                    </div>
-                  </div>
-                </div>
+                  );
+                })()}
               </div>
 
               <div>
@@ -485,6 +612,22 @@ export default function Home() {
                     className="mt-2"
                   />
                 )}
+              </div>
+
+              {/* ── Heart Rate Control ── */}
+              <div>
+                <div className="flex justify-between items-center text-sm font-medium">
+                  <label>Target Heart Rate ({targetHr[0]} bpm)</label>
+                  <span className="text-xs text-gray-400 font-normal">Dynamic HR Trace</span>
+                </div>
+                <Slider
+                  value={targetHr}
+                  onValueChange={setTargetHr}
+                  max={195}
+                  min={110}
+                  step={1}
+                  className="mt-2"
+                />
               </div>
 
               {/* ── Custom Split Pace ── */}
@@ -536,25 +679,61 @@ export default function Home() {
 
                   {useCustomSplits && routeStats.distance > 0 && (
                     <div className="space-y-2">
-                      <p className="text-xs text-gray-500">Format MM:SS atau desimal. Kosongkan = pakai pace global.</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        {Array.from({ length: Math.ceil(routeStats.distance) }, (_, i) => (
-                          <div key={i} className="flex items-center gap-1">
-                            <span className="text-xs text-gray-500 w-12 shrink-0">km {i + 1}</span>
-                            <Input
-                              value={splitPaces[i] ?? ""}
-                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                                setSplitPaces(prev => {
-                                  const next = [...prev];
-                                  next[i] = e.target.value;
-                                  return next;
-                                });
-                              }}
-                              placeholder={formatPaceMMSS(pace[0])}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                        ))}
+                      <p className="text-xs text-gray-500">Format MM:SS / desimal. Tekan 🚶 untuk mode Rest/Walk (10:00 min/km).</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {Array.from({ length: Math.ceil(routeStats.distance) }, (_, i) => {
+                          const isWalk = walkSplits[i] ?? false;
+                          return (
+                            <div key={i} className="flex items-center gap-1">
+                              <span className="text-xs text-gray-500 w-10 shrink-0">km {i + 1}</span>
+                              <Input
+                                value={splitPaces[i] ?? ""}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                  setSplitPaces(prev => {
+                                    const next = [...prev];
+                                    next[i] = e.target.value;
+                                    return next;
+                                  });
+                                }}
+                                placeholder={formatPaceMMSS(pace[0])}
+                                className="h-8 text-sm flex-1"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setWalkSplits(prev => {
+                                    const next = [...prev];
+                                    const newVal = !next[i];
+                                    next[i] = newVal;
+                                    if (newVal) {
+                                      setSplitPaces(sp => {
+                                        const spNext = [...sp];
+                                        spNext[i] = "10:00";
+                                        return spNext;
+                                      });
+                                    } else {
+                                      setSplitPaces(sp => {
+                                        const spNext = [...sp];
+                                        spNext[i] = "";
+                                        return spNext;
+                                      });
+                                    }
+                                    return next;
+                                  });
+                                }}
+                                className={cn(
+                                  "h-8 px-2 text-xs rounded border transition-colors flex items-center gap-0.5 font-medium shrink-0",
+                                  isWalk
+                                    ? "bg-amber-100 text-amber-800 border-amber-300 font-semibold"
+                                    : "bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100"
+                                )}
+                                title={isWalk ? "Split ini diset Rest/Walk" : "Set split ini sebagai Rest/Walk (10:00 min/km)"}
+                              >
+                                🚶{isWalk ? " Walk" : ""}
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -593,13 +772,16 @@ export default function Home() {
                                 key={row.km}
                                 className={cn(
                                   "border-b border-gray-100 last:border-0",
-                                  isLast ? "bg-orange-50" : idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"
+                                  row.isWalk ? "bg-amber-50/70" : isLast ? "bg-orange-50" : idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"
                                 )}
                               >
-                                <td className="px-2 py-1.5 text-gray-700 font-medium">
-                                  {isLast && row.dist < 1
-                                    ? `${(row.dist * 1000).toFixed(0)}m`
-                                    : `km ${row.km}`}
+                                <td className="px-2 py-1.5 text-gray-700 font-medium flex items-center gap-1">
+                                  {row.isWalk && <span>🚶</span>}
+                                  <span>
+                                    {isLast && row.dist < 1
+                                      ? `${(row.dist * 1000).toFixed(0)}m`
+                                      : `km ${row.km}`}
+                                  </span>
                                 </td>
                                 <td className="px-2 py-1.5 text-center font-mono text-gray-800">
                                   {formatPaceMMSS(row.pace)}
@@ -766,6 +948,13 @@ export default function Home() {
                   const interpolatedCoords = applyGpsDrift(rawInterpolated, driftAmount);
                   const n = interpolatedCoords.length;
 
+                  // Seeded pseudo-random generator for realistic trace jitter
+                  const seed = interpolatedCoords.reduce((acc, c) => acc + c[0] + c[1], 0);
+                  const pseudoRand = (i: number) => {
+                    const x = Math.sin(seed + i * 12.9898) * 43758.5453;
+                    return x - Math.floor(x);
+                  };
+
                   // --- Calculate Exact Cumulative Distance Along the Drifted Track ---
                   // Strava recalculates total distance by summing distances between all <trkpt> points.
                   // By measuring cumulative distance after drift, time distribution matches actual geometry.
@@ -870,14 +1059,59 @@ ${interpolatedCoords.map(([lon, lat], index) => {
           const elevation = Math.round(15 + Math.sin(index * 0.1) * 6 + ((Math.sin(index * 0.03) + 1) * 3));
           // Calculate point-specific speed (slightly vary around average)
           const pointSpeed = avgSpeed * (0.95 + (Math.random() * 0.1)); // ±5% variation
+
+          // --- Dynamic Heart Rate & Cadence Simulation ---
+          const kmSoFar = cumDistMeters[index] / 1000;
+          const splitIdx = Math.min(Math.floor(kmSoFar), Math.max(0, Math.ceil(totalTrackKm) - 1));
+          const isWalkSegment = (walkSplits[splitIdx] ?? false) || (activityType === "run" && useCustomSplits && parseSplitPace(splitPaces[splitIdx] || "") >= 9.0);
+
+          let pointHr: number;
+          let pointCad: number;
+
+          if (activityType === "run") {
+            if (isWalkSegment) {
+              const hrJitter = Math.sin(index * 0.4) * 2 + ((pseudoRand(index) - 0.5) * 2);
+              pointHr = Math.round(118 + hrJitter);
+              const cadJitter = Math.round((pseudoRand(index + 99) - 0.5) * 4);
+              pointCad = Math.round(116 + cadJitter);
+            } else {
+              const baseTarget = targetHr[0];
+              const pointPace = pointSpeed > 0 ? (1000 / pointSpeed) / 60 : pace[0]; // min/km
+              const avgPaceVal = pace[0];
+              // Faster pace -> higher HR, Slower pace -> lower HR
+              const paceDiff = avgPaceVal - pointPace;
+              const paceEffect = paceDiff * 10;
+              // Cardiac drift over run duration
+              const driftEffect = (index / (n || 1)) * 5;
+              // Elevation climbing effect
+              const eleDiff = index > 0 ? Math.max(0, elevation - 15) * 0.3 : 0;
+              // Micro-jitter
+              const hrJitter = Math.sin(index * 0.3) * 2.5 + ((pseudoRand(index) - 0.5) * 2);
+
+              pointHr = Math.round(Math.max(90, Math.min(205, baseTarget + paceEffect + driftEffect + eleDiff + hrJitter)));
+
+              // Cadence correlates with pace (e.g. 5:00 min/km -> ~178 spm)
+              const baseCadence = 180 - (pointPace - 5.0) * 8;
+              const cadJitter = Math.round((pseudoRand(index + 55) - 0.5) * 4);
+              pointCad = Math.round(Math.max(130, Math.min(210, baseCadence + cadJitter)));
+            }
+          } else {
+            // Cycling
+            const baseTarget = targetHr[0];
+            const hrJitter = Math.sin(index * 0.3) * 2.5 + ((pseudoRand(index) - 0.5) * 2);
+            pointHr = Math.round(Math.max(80, Math.min(195, baseTarget + hrJitter)));
+            const cadJitter = Math.round((pseudoRand(index + 55) - 0.5) * 6);
+            pointCad = Math.round(Math.max(60, Math.min(120, 85 + cadJitter)));
+          }
+
           return `      <trkpt lat="${lat}" lon="${lon}">
         <ele>${elevation}</ele>
         <time>${buildGpxTimestamp(refDate, startHour, startMinute, secondsFromStart)}</time>
         <extensions>
           <gpxtpx:TrackPointExtension>
             <gpxtpx:speed>${pointSpeed.toFixed(2)}</gpxtpx:speed>
-            <gpxtpx:hr>${activityType === "run" ? "165" : "145"}</gpxtpx:hr>
-            <gpxtpx:cad>${activityType === "run" ? "180" : "85"}</gpxtpx:cad>
+            <gpxtpx:hr>${pointHr}</gpxtpx:hr>
+            <gpxtpx:cad>${pointCad}</gpxtpx:cad>
           </gpxtpx:TrackPointExtension>
         </extensions>
       </trkpt>`;
