@@ -133,6 +133,36 @@ export default function Home() {
   const [showGarminSuggestions, setShowGarminSuggestions] = useState(false)
   const garminInputRef = useRef<HTMLInputElement>(null)
 
+  const activityTypes = [
+    { id: "run", label: "Run", icon: "🏃", defaultPace: 5.5, defaultHr: 160, minPace: 3, maxPace: 12 },
+    { id: "walk", label: "Walk", icon: "🚶", defaultPace: 10.0, defaultHr: 110, minPace: 6, maxPace: 20 },
+    { id: "hike", label: "Hike", icon: "🥾", defaultPace: 14.0, defaultHr: 125, minPace: 8, maxPace: 30 },
+    { id: "bike", label: "Bike", icon: "🚴", defaultPace: 0, defaultHr: 140, minPace: 0, maxPace: 0 },
+  ];
+
+  const handleActivityTypeChange = (newType: string) => {
+    setActivityType(newType);
+    const targetConfig = activityTypes.find(a => a.id === newType);
+    if (newType === "bike") {
+      setRouteStats(prev => ({
+        ...prev,
+        duration: (prev.distance / speed[0]) * 60
+      }));
+      setTargetHr([140]);
+    } else if (targetConfig) {
+      let newPaceVal = pace[0];
+      if (newPaceVal < targetConfig.minPace || newPaceVal > targetConfig.maxPace) {
+        newPaceVal = targetConfig.defaultPace;
+        setPace([newPaceVal]);
+      }
+      setRouteStats(prev => ({
+        ...prev,
+        duration: prev.distance * newPaceVal
+      }));
+      setTargetHr([targetConfig.defaultHr]);
+    }
+  };
+
   const formatDuration = (minutes: number): string => {
     const hours = Math.floor(minutes / 60)
     const mins = Math.floor(minutes % 60)
@@ -146,7 +176,7 @@ export default function Home() {
 
   const handlePaceChange = (newPace: number[]) => {
     setPace(newPace)
-    if (activityType === "run") {
+    if (activityType !== "bike") {
       setRouteStats((prev: RouteStats) => ({
         ...prev,
         duration: prev.distance * newPace[0]
@@ -254,9 +284,9 @@ export default function Home() {
     });
   }
 
-  // Calculate dynamic effective total duration & average pace for Run (updates live when split paces change)
-  const getEffectiveRunStats = () => {
-    if (activityType !== "run" || routeStats.distance === 0) {
+  // Calculate dynamic effective total duration & average pace for Pace-based activities (Run/Walk/Hike)
+  const getEffectivePaceStats = () => {
+    if (activityType === "bike" || routeStats.distance === 0) {
       return {
         durationMinutes: routeStats.duration,
         avgPaceMinKm: pace[0],
@@ -293,7 +323,7 @@ export default function Home() {
     setCoordinates(coords as Coordinate[])
     setRouteStats({
       ...stats,
-      duration: activityType === "run" ? stats.distance * pace[0] : stats.distance / speed[0] * 60
+      duration: activityType !== "bike" ? stats.distance * pace[0] : stats.distance / speed[0] * 60
     })
     syncSplitCount(stats.distance)
   }
@@ -310,7 +340,6 @@ export default function Home() {
         const parser = new DOMParser();
         const xmlDoc = parser.parseFromString(xmlText, "application/xml");
 
-        // Look for trkpt elements first, then wpt elements
         const trkptNodes = Array.from(xmlDoc.getElementsByTagName("trkpt"));
         const wptNodes = Array.from(xmlDoc.getElementsByTagName("wpt"));
         const nodes = trkptNodes.length > 0 ? trkptNodes : wptNodes;
@@ -334,14 +363,12 @@ export default function Home() {
           return;
         }
 
-        // Extract activity name from <name> tag if present
         const nameTags = xmlDoc.getElementsByTagName("name");
         if (nameTags.length > 0 && nameTags[0].textContent) {
           const nameText = nameTags[0].textContent.trim();
           if (nameText) setActivityName(nameText);
         }
 
-        // Extract description from <desc> tag if present
         const descTags = xmlDoc.getElementsByTagName("desc");
         if (descTags.length > 0 && descTags[0].textContent) {
           const descText = descTags[0].textContent.trim();
@@ -360,22 +387,12 @@ export default function Home() {
     reader.readAsText(file);
   }
 
-  // Build a proper UTC ISO string from a local Date + user-selected hour/minute.
-  // Strava reads GPX timestamps as UTC, then converts to the athlete's local timezone for display.
-  // So we must write REAL UTC: local time minus the browser's UTC offset.
-  // e.g. 16:00 WIB (UTC+7) → write T09:00:00Z → Strava displays as 16:00 WIB ✓
   function buildGpxTimestamp(localDate: Date, hour: string, minute: string, extraSeconds = 0): string {
-    // Start with total seconds in local time
     const localTotalSeconds = parseInt(hour) * 3600 + parseInt(minute) * 60 + extraSeconds;
-    // getTimezoneOffset() returns minutes BEHIND UTC (negative for UTC+x zones)
-    // e.g. WIB (UTC+7) → -420 min → -25200 sec
     const tzOffsetSeconds = localDate.getTimezoneOffset() * 60;
-    // Convert to UTC seconds
     const utcTotalSeconds = localTotalSeconds + tzOffsetSeconds;
-    // Calculate day overflow/underflow (e.g. 22:00 WIB + extra 3h = 01:00 UTC next day)
     const dayOffset = Math.floor(utcTotalSeconds / 86400);
-    const utcSecondsInDay = ((utcTotalSeconds % 86400) + 86400) % 86400; // keep positive
-    // Compute final UTC date with day offset
+    const utcSecondsInDay = ((utcTotalSeconds % 86400) + 86400) % 86400;
     const utcDate = new Date(
       localDate.getFullYear(),
       localDate.getMonth(),
@@ -390,16 +407,14 @@ export default function Home() {
     return `${y}-${mo}-${d}T${String(th).padStart(2,'0')}:${String(tm).padStart(2,'0')}:${String(ts).padStart(2,'0')}Z`;
   }
 
-  // Helper to interpolate points every ~10 meters between coordinates
   function interpolateRoutePoints(coords: Coordinate[], targetSpacing = 10): Coordinate[] {
     if (coords.length < 2) return coords;
     const toRad = (deg: number) => deg * Math.PI / 180;
-    const R = 6371000; // meters
+    const R = 6371000;
     const result: Coordinate[] = [];
     for (let i = 0; i < coords.length - 1; i++) {
       const [lon1, lat1] = coords[i];
       const [lon2, lat2] = coords[i + 1];
-      // Haversine distance
       const dLat = toRad(lat2 - lat1);
       const dLon = toRad(lon2 - lon1);
       const a = Math.sin(dLat/2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2) ** 2;
@@ -408,24 +423,20 @@ export default function Home() {
       const numPoints = Math.max(1, Math.round(dist / targetSpacing));
       for (let j = 0; j < numPoints; j++) {
         const frac = j / numPoints;
-        // Linear interpolation in lat/lon (good enough for short distances)
         const lat = lat1 + (lat2 - lat1) * frac;
         const lon = lon1 + (lon2 - lon1) * frac;
         result.push([lon, lat]);
       }
     }
-    // Add the last point
     result.push(coords[coords.length - 1]);
     return result;
   }
 
-  // Helper to add natural GPS drift / jitter (coretan GPS) for realistic watch tracking on Strava
   function applyGpsDrift(coords: Coordinate[], driftMeters = 1.8): Coordinate[] {
     if (coords.length < 3 || driftMeters <= 0) return coords;
     const n = coords.length;
     const R = 6371000;
 
-    // Deterministic seed based on track coordinates
     const seed = coords.reduce((acc, c) => acc + c[0] + c[1], 0);
     const pseudoRand = (i: number) => {
       const x = Math.sin(seed + i * 12.9898) * 43758.5453;
@@ -443,11 +454,9 @@ export default function Home() {
       const len = Math.sqrt(dLat * dLat + dLon * dLon);
       if (len === 0) return [lon, lat];
 
-      // Perpendicular vector (-dy, dx)
       const perpLat = -dLon / len;
       const perpLon = dLat / len;
 
-      // Multi-frequency smooth sway + micro-jitter
       const phase1 = Math.sin(i * 0.25 + seed % 10) * 0.7;
       const phase2 = Math.sin(i * 0.08 + seed % 7) * 0.3;
       const jitter = (pseudoRand(i) - 0.5) * 0.3;
@@ -513,22 +522,40 @@ export default function Home() {
         {/* Form Section */}
         <div className="w-full md:w-1/3 flex justify-center items-start md:items-stretch">
           <Card className="w-full max-w-md p-4 md:p-6 rounded-none md:rounded-lg border-t md:border-t-0 md:border-l shadow-none md:shadow-lg">
-            <div className="flex items-center justify-between mb-4 md:mb-6">
-              <h2 className="text-lg md:text-xl font-semibold">{activityType === "run" ? "Run Details" : "Ride Details"}</h2>
-              <div className="flex items-center gap-2">
-                <span className={cn("text-sm", activityType === "run" ? "text-orange-500" : "text-gray-400")}>Run</span>
-                <Switch 
-                  checked={activityType === "bike"}
-                  onCheckedChange={(checked: boolean) => setActivityType(checked ? "bike" : "run")}
-                />
-                <span className={cn("text-sm", activityType === "bike" ? "text-orange-500" : "text-gray-400")}>Bike</span>
+            <div className="flex flex-col gap-3 mb-4 md:mb-6">
+              <h2 className="text-lg md:text-xl font-semibold">
+                {activityType === "run"
+                  ? "Run Details"
+                  : activityType === "walk"
+                  ? "Walk Details"
+                  : activityType === "hike"
+                  ? "Hike Details"
+                  : "Ride Details"}
+              </h2>
+              <div className="grid grid-cols-4 gap-1 p-1 bg-gray-100 rounded-lg">
+                {activityTypes.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleActivityTypeChange(item.id)}
+                    className={cn(
+                      "flex flex-col sm:flex-row items-center justify-center gap-1 py-1.5 px-2 rounded-md text-xs font-semibold transition-all",
+                      activityType === item.id
+                        ? "bg-orange-500 text-white shadow-sm"
+                        : "text-gray-600 hover:bg-gray-200/70 hover:text-gray-900"
+                    )}
+                  >
+                    <span>{item.icon}</span>
+                    <span>{item.label}</span>
+                  </button>
+                ))}
               </div>
             </div>
 
             <div className="space-y-4 md:space-y-6">
               <div>
-                <label className="text-sm font-medium">{activityType === "run" ? "Pace Unit" : "Speed Unit"}</label>
-                {activityType === "run" ? (
+                <label className="text-sm font-medium">{activityType !== "bike" ? "Pace Unit" : "Speed Unit"}</label>
+                {activityType !== "bike" ? (
                   <Select value={paceUnit} onValueChange={setPaceUnit}>
                     <SelectTrigger>
                       <SelectValue />
@@ -552,10 +579,18 @@ export default function Home() {
               </div>
 
               <div>
-                <h3 className="text-lg font-semibold mb-4">{activityType === "run" ? "Run Stats" : "Ride Stats"}</h3>
+                <h3 className="text-lg font-semibold mb-4">
+                  {activityType === "run"
+                    ? "Run Stats"
+                    : activityType === "walk"
+                    ? "Walk Stats"
+                    : activityType === "hike"
+                    ? "Hike Stats"
+                    : "Ride Stats"}
+                </h3>
                 {(() => {
-                  const runStatsEffective = getEffectiveRunStats();
-                  const displayDurationMinutes = activityType === "run" ? runStatsEffective.durationMinutes : routeStats.duration;
+                  const paceStatsEffective = getEffectivePaceStats();
+                  const displayDurationMinutes = activityType !== "bike" ? paceStatsEffective.durationMinutes : routeStats.duration;
                   return (
                     <div className="grid grid-cols-2 gap-4">
                       <div className="text-center">
@@ -572,16 +607,16 @@ export default function Home() {
                       </div>
                       <div className="text-center">
                         <div className="text-3xl font-bold">
-                          {activityType === "run"
+                          {activityType !== "bike"
                             ? paceUnit === "min/km"
-                              ? formatPaceMMSS(runStatsEffective.avgPaceMinKm)
-                              : (60 / runStatsEffective.avgPaceMinKm).toFixed(1)
+                              ? formatPaceMMSS(paceStatsEffective.avgPaceMinKm)
+                              : (60 / paceStatsEffective.avgPaceMinKm).toFixed(1)
                             : speedUnit === "km/h"
                               ? speed[0].toFixed(1)
                               : (speed[0] / 1.60934).toFixed(1)}
                         </div>
                         <div className="text-sm text-gray-500">
-                          {activityType === "run"
+                          {activityType !== "bike"
                             ? `${paceUnit}${useCustomSplits ? " (Avg)" : ""}`
                             : speedUnit}
                         </div>
@@ -592,13 +627,13 @@ export default function Home() {
               </div>
 
               <div>
-                <label className="text-sm font-medium">{activityType === "run" ? "Pace (min/km)" : "Speed (km/h)"}</label>
-                {activityType === "run" ? (
+                <label className="text-sm font-medium">{activityType !== "bike" ? "Pace (min/km)" : "Speed (km/h)"}</label>
+                {activityType !== "bike" ? (
                   <Slider
                     value={pace}
                     onValueChange={handlePaceChange}
-                    max={10}
-                    min={3}
+                    max={activityType === "walk" ? 20 : activityType === "hike" ? 30 : 12}
+                    min={activityType === "walk" ? 6 : activityType === "hike" ? 8 : 3}
                     step={0.1}
                     className="mt-2"
                   />
@@ -624,14 +659,14 @@ export default function Home() {
                   value={targetHr}
                   onValueChange={setTargetHr}
                   max={195}
-                  min={110}
+                  min={80}
                   step={1}
                   className="mt-2"
                 />
               </div>
 
               {/* ── Custom Split Pace ── */}
-              {activityType === "run" && (
+              {activityType !== "bike" && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium">Custom Split Pace</label>
@@ -654,7 +689,7 @@ export default function Home() {
                         type="button"
                         onClick={() => applySplitPreset('negative')}
                         className="flex-1 text-xs px-2 py-1.5 rounded border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 transition-colors font-medium"
-                        title="Pace makin cepat tiap km (ideal race strategy)"
+                        title="Pace makin cepat tiap km"
                       >
                         ↘ Negative
                       </button>
@@ -744,7 +779,7 @@ export default function Home() {
               )}
 
               {/* ── Split Preview Table ── */}
-              {activityType === "run" && routeStats.distance > 0 && (
+              {activityType !== "bike" && routeStats.distance > 0 && (
                 <div>
                   <button
                     type="button"
@@ -800,11 +835,27 @@ export default function Home() {
               )}
 
               <div>
-                <label className="text-sm font-medium">{activityType === "run" ? "Run Name" : "Ride Name"}</label>
+                <label className="text-sm font-medium">
+                  {activityType === "run"
+                    ? "Run Name"
+                    : activityType === "walk"
+                    ? "Walk Name"
+                    : activityType === "hike"
+                    ? "Hike Name"
+                    : "Ride Name"}
+                </label>
                 <Input
                   value={activityName}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setActivityName(e.target.value)}
-                  placeholder={activityType === "run" ? "Morning Run" : "Morning Ride"}
+                  placeholder={
+                    activityType === "run"
+                      ? "Morning Run"
+                      : activityType === "walk"
+                      ? "Morning Walk"
+                      : activityType === "hike"
+                      ? "Morning Hike"
+                      : "Morning Ride"
+                  }
                   className="mt-1"
                 />
               </div>
@@ -863,7 +914,15 @@ export default function Home() {
                 <Textarea
                   value={activityDesc}
                   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setActivityDesc(e.target.value)}
-                  placeholder={activityType === "run" ? "Great morning run through the park..." : "Great morning ride through the park..."}
+                  placeholder={
+                    activityType === "run"
+                      ? "Great morning run through the park..."
+                      : activityType === "walk"
+                      ? "Great morning walk through the neighborhood..."
+                      : activityType === "hike"
+                      ? "Scenic mountain hike..."
+                      : "Great morning ride through the park..."
+                  }
                   className="mt-1"
                 />
               </div>
@@ -935,29 +994,21 @@ export default function Home() {
                 className="w-full bg-orange-500 hover:bg-orange-600 text-base py-3 md:py-2"
                 onClick={() => {
                   if (routeStats.distance === 0) return;
-                  // Get activity name and description
                   const trimmedName = activityName.trim();
                   if (!trimmedName) return;
-                  // activityDesc comes from useState, no DOM query needed
-                  // Use the selected date (or today) as reference for year/month/day only
                   const refDate = date || new Date();
 
-                  // Interpolate points for realistic GPX + apply natural GPS drift/jitter
-                  const rawInterpolated = interpolateRoutePoints(coordinates, 10); // 10 meters spacing
+                  const rawInterpolated = interpolateRoutePoints(coordinates, 10);
                   const driftAmount = gpsRealism === "high" ? 3.0 : gpsRealism === "natural" ? 1.8 : 0;
                   const interpolatedCoords = applyGpsDrift(rawInterpolated, driftAmount);
                   const n = interpolatedCoords.length;
 
-                  // Seeded pseudo-random generator for realistic trace jitter
                   const seed = interpolatedCoords.reduce((acc, c) => acc + c[0] + c[1], 0);
                   const pseudoRand = (i: number) => {
                     const x = Math.sin(seed + i * 12.9898) * 43758.5453;
                     return x - Math.floor(x);
                   };
 
-                  // --- Calculate Exact Cumulative Distance Along the Drifted Track ---
-                  // Strava recalculates total distance by summing distances between all <trkpt> points.
-                  // By measuring cumulative distance after drift, time distribution matches actual geometry.
                   let totalTrackDistanceMeters = 0;
                   const cumDistMeters: number[] = [0];
                   const toRad = (deg: number) => deg * Math.PI / 180;
@@ -977,23 +1028,19 @@ export default function Home() {
 
                   const totalTrackKm = totalTrackDistanceMeters / 1000;
 
-                  // --- Pace / Speed → Duration ---
-                  // Calculate duration in seconds based on the actual track distance Strava will read
+                  const isPaceActivity = activityType !== "bike";
                   let durationInSeconds: number;
-                  let avgSpeed: number; // m/s
+                  let avgSpeed: number;
 
-                  // Build per-point cumulative-seconds array for custom splits (run only)
                   const cumSecondsPerPoint: number[] = new Array(n).fill(0);
 
-                  if (activityType === "run") {
+                  if (isPaceActivity) {
                     if (useCustomSplits) {
-                      const splitPaceValues = getEffectiveSplitPaces(totalTrackKm); // min/km per split
-                      // Assign seconds to each point based on which km-split it falls in
+                      const splitPaceValues = getEffectiveSplitPaces(totalTrackKm);
                       for (let i = 1; i < n; i++) {
                         const kmSoFar = cumDistMeters[i] / 1000;
                         const kmPrev  = cumDistMeters[i - 1] / 1000;
                         const segKm   = kmSoFar - kmPrev;
-                        // Which km-split does this segment's midpoint belong to?
                         const splitIdx = Math.min(Math.floor((kmPrev + kmSoFar) / 2), splitPaceValues.length - 1);
                         const segSeconds = segKm * splitPaceValues[splitIdx] * 60;
                         cumSecondsPerPoint[i] = cumSecondsPerPoint[i - 1] + segSeconds;
@@ -1005,9 +1052,9 @@ export default function Home() {
                     }
                     avgSpeed = totalTrackDistanceMeters / (durationInSeconds || 1);
                   } else {
-                    const speedKmh = speed[0]; // e.g. 20 km/h
-                    durationInSeconds = Math.round((totalTrackKm / speedKmh) * 3600); // km ÷ km/h × 3600s
-                    avgSpeed = speedKmh / 3.6; // m/s
+                    const speedKmh = speed[0];
+                    durationInSeconds = Math.round((totalTrackKm / speedKmh) * 3600);
+                    avgSpeed = speedKmh / 3.6;
                   }
 
                   if (durationInSeconds < 1) durationInSeconds = 1;
@@ -1015,6 +1062,15 @@ export default function Home() {
 
                   const creatorString = gpxCreator === "Garmin" ? (garminModel.trim() ? garminModel.trim() : "Garmin") : gpxCreator;
                   const activityNameFinal = trimmedName;
+
+                  const gpxTypeMap: Record<string, string> = {
+                    run: "running",
+                    walk: "walking",
+                    hike: "hiking",
+                    bike: "cycling",
+                  };
+                  const gpxType = gpxTypeMap[activityType] || "running";
+
                   const gpxContent = `<?xml version="1.0" encoding="UTF-8"?>
 <gpx xmlns="http://www.topografix.com/GPX/1/1" 
   xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1"
@@ -1031,7 +1087,7 @@ export default function Home() {
     <trk>
       <name>${activityNameFinal}</name>
       <desc>${activityDesc}</desc>
-      <type>${activityType === "run" ? "running" : "cycling"}</type>
+      <type>${gpxType}</type>
       <extensions>
         <gpxx:TrackStatsExtension>
           <gpxx:Distance>${distanceInMeters}</gpxx:Distance>
@@ -1044,56 +1100,58 @@ export default function Home() {
       </extensions>
       <trkseg>
 ${interpolatedCoords.map(([lon, lat], index) => {
-          // Distribute time: custom splits use per-split paced seconds; else proportional
           let secondsFromStart = 0;
           if (n > 1 && totalTrackDistanceMeters > 0) {
             if (index === n - 1) {
               secondsFromStart = durationInSeconds;
-            } else if (activityType === "run" && useCustomSplits) {
+            } else if (isPaceActivity && useCustomSplits) {
               secondsFromStart = Math.round(cumSecondsPerPoint[index]);
             } else {
               secondsFromStart = Math.round((cumDistMeters[index] / totalTrackDistanceMeters) * durationInSeconds);
             }
           }
-          // Calculate elevation (realistic rolling terrain elevation profile)
           const elevation = Math.round(15 + Math.sin(index * 0.1) * 6 + ((Math.sin(index * 0.03) + 1) * 3));
-          // Calculate point-specific speed (slightly vary around average)
-          const pointSpeed = avgSpeed * (0.95 + (Math.random() * 0.1)); // ±5% variation
+          const pointSpeed = avgSpeed * (0.95 + (Math.random() * 0.1));
 
-          // --- Dynamic Heart Rate & Cadence Simulation ---
           const kmSoFar = cumDistMeters[index] / 1000;
           const splitIdx = Math.min(Math.floor(kmSoFar), Math.max(0, Math.ceil(totalTrackKm) - 1));
-          const isWalkSegment = (walkSplits[splitIdx] ?? false) || (activityType === "run" && useCustomSplits && parseSplitPace(splitPaces[splitIdx] || "") >= 9.0);
+          const isWalkSegment = (walkSplits[splitIdx] ?? false) || (isPaceActivity && useCustomSplits && parseSplitPace(splitPaces[splitIdx] || "") >= 9.0);
 
           let pointHr: number;
           let pointCad: number;
 
-          if (activityType === "run") {
-            if (isWalkSegment) {
+          if (isPaceActivity) {
+            if (isWalkSegment && activityType === "run") {
               const hrJitter = Math.sin(index * 0.4) * 2 + ((pseudoRand(index) - 0.5) * 2);
               pointHr = Math.round(118 + hrJitter);
               const cadJitter = Math.round((pseudoRand(index + 99) - 0.5) * 4);
               pointCad = Math.round(116 + cadJitter);
             } else {
               const baseTarget = targetHr[0];
-              const pointPace = pointSpeed > 0 ? (1000 / pointSpeed) / 60 : pace[0]; // min/km
+              const pointPace = pointSpeed > 0 ? (1000 / pointSpeed) / 60 : pace[0];
               const avgPaceVal = pace[0];
-              // Faster pace -> higher HR, Slower pace -> lower HR
               const paceDiff = avgPaceVal - pointPace;
               const paceEffect = paceDiff * 10;
-              // Cardiac drift over run duration
               const driftEffect = (index / (n || 1)) * 5;
-              // Elevation climbing effect
               const eleDiff = index > 0 ? Math.max(0, elevation - 15) * 0.3 : 0;
-              // Micro-jitter
               const hrJitter = Math.sin(index * 0.3) * 2.5 + ((pseudoRand(index) - 0.5) * 2);
 
-              pointHr = Math.round(Math.max(90, Math.min(205, baseTarget + paceEffect + driftEffect + eleDiff + hrJitter)));
+              pointHr = Math.round(Math.max(70, Math.min(205, baseTarget + paceEffect + driftEffect + eleDiff + hrJitter)));
 
-              // Cadence correlates with pace (e.g. 5:00 min/km -> ~178 spm)
-              const baseCadence = 180 - (pointPace - 5.0) * 8;
-              const cadJitter = Math.round((pseudoRand(index + 55) - 0.5) * 4);
-              pointCad = Math.round(Math.max(130, Math.min(210, baseCadence + cadJitter)));
+              if (activityType === "walk") {
+                const baseCadence = 120 - (pointPace - 10.0) * 4;
+                const cadJitter = Math.round((pseudoRand(index + 55) - 0.5) * 4);
+                pointCad = Math.round(Math.max(90, Math.min(145, baseCadence + cadJitter)));
+              } else if (activityType === "hike") {
+                const baseCadence = 105 - (pointPace - 15.0) * 3;
+                const cadJitter = Math.round((pseudoRand(index + 55) - 0.5) * 4);
+                pointCad = Math.round(Math.max(80, Math.min(135, baseCadence + cadJitter)));
+              } else {
+                // run
+                const baseCadence = 180 - (pointPace - 5.0) * 8;
+                const cadJitter = Math.round((pseudoRand(index + 55) - 0.5) * 4);
+                pointCad = Math.round(Math.max(130, Math.min(210, baseCadence + cadJitter)));
+              }
             }
           } else {
             // Cycling
@@ -1131,7 +1189,7 @@ ${interpolatedCoords.map(([lon, lat], index) => {
                 }}
                 disabled={routeStats.distance === 0}
               >
-                Download {activityType === "run" ? "Run" : "Ride"} File
+                Download {activityType === "run" ? "Run" : activityType === "walk" ? "Walk" : activityType === "hike" ? "Hike" : "Ride"} File
               </Button>
             </div>
           </Card>
